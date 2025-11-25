@@ -3,13 +3,14 @@ import { useState, useCallback } from 'react';
 import { GoogleGenAI, Type } from '@google/genai';
 import type { KubeProject } from '../types.ts';
 
-const API_KEY = process.env.API_KEY;
+const API_KEY = import.meta.env.VITE_API_KEY;
 
 if (!API_KEY) {
-  console.error("API_KEY environment variable not set.");
+  console.error("API_KEY environment variable not set. Please set VITE_API_KEY in .env file.");
 }
 
-const ai = new GoogleGenAI({ apiKey: API_KEY, vertexai: true });
+// Use regular GoogleGenAI without vertexai (vertexai is not supported in browser)
+const ai = API_KEY ? new GoogleGenAI({ apiKey: API_KEY }) : null;
 
 const responseSchema = {
   type: Type.OBJECT,
@@ -94,7 +95,13 @@ export const useKubeGenerator = () => {
     setError(null);
 
     if (!API_KEY) {
-      setError("API key is not configured. Please set the API_KEY environment variable.");
+      setError("API key is not configured. Please set VITE_API_KEY in .env file and restart the server.");
+      setIsLoading(false);
+      return null;
+    }
+
+    if (!ai) {
+      setError("AI client failed to initialize. Please check your API key.");
       setIsLoading(false);
       return null;
     }
