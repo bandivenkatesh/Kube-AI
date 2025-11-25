@@ -1,0 +1,5 @@
+
+{
+  "name": "KubeArchitect AI",
+  "description": "An AI-powered Kubernetes project generator. Describe your application architecture, and KubeArchitect AI will generate the necessary Dockerfiles, Kubernetes manifests, and architectural explanations to get you started."
+}
