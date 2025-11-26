@@ -20,7 +20,7 @@ spec:
   containers:
   # 1. JNLP Container (REQUIRED: Handles communication back to the Jenkins Master)
   - name: jnlp
-    image: jenkins/jnlp-agent:latest-jdk17 
+    image: jenkins/agent:latest-jdk17 
     args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)', '\$(JENKINS_WEB_SOCKET)']
     resources:
       limits:
