@@ -1,11 +1,11 @@
 // == USER DEFINED VARIABLES ==
 // IMPORTANT: Update these values to match your specific environment
-def K8S_DEPLOYMENT_NAME = "kube-ai"                  // The name of your K8s Deployment resource
-def K8S_NAMESPACE = "app-namespace"                  // The target namespace for deployment
-def REGISTRY_IMAGE = "venky2222/your-node-app"       // Docker Registry path (e.g., docker.io/username/repo)
-def SONAR_PROJECT_KEY = "node-app-project-key"       // Key defined in SonarQube for this project
-def SONAR_SERVER_NAME = "SonarQube-Server"           // Name used in Jenkins > Configure System
-def DOCKER_AUTH_SECRET = "docker-auth-secret"        // K8s Secret name containing Docker credentials for Kaniko mount
+def K8S_DEPLOYMENT_NAME = "kube-ai"              // The name of your K8s Deployment resource
+def K8S_NAMESPACE = "app-namespace"              // The target namespace for deployment
+def REGISTRY_IMAGE = "venky2222/your-node-app"    // Docker Registry path (e.g., docker.io/username/repo)
+def SONAR_PROJECT_KEY = "node-app-project-key"    // Key defined in SonarQube for this project
+def SONAR_SERVER_NAME = "SonarQube-Server"        // Name used in Jenkins > Configure System
+def DOCKER_AUTH_SECRET = "docker-auth-secret"     // K8s Secret name containing Docker credentials for Kaniko mount
 
 // == PIPELINE DEFINITION ==
 pipeline {
@@ -21,7 +21,7 @@ spec:
   # 1. JNLP Container (REQUIRED: Handles communication back to the Jenkins Master)
   - name: jnlp
     image: jenkins/agent:latest-jdk17 
-    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)', '\$(JENKINS_WEB_SOCKET)']
+    # REMOVED: args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)', '\$(JENKINS_WEB_SOCKET)']
     resources:
       limits:
         memory: 256Mi
@@ -78,7 +78,7 @@ spec:
                 checkout scm: [$class: 'GitSCM', branches: [[name: '*/main']], 
                                extensions: [], 
                                userRemoteConfigs: [[credentialsId: 'github-credentials', 
-                                                    url: 'https://github.com/bandivenkatesh/Kube-AI.git']]]
+                                                     url: 'https://github.com/bandivenkatesh/Kube-AI.git']]]
             }
         }
         
@@ -123,8 +123,8 @@ spec:
                                                      passwordVariable: 'PASS', 
                                                      usernameVariable: 'USER')]) {
                         sh """
-                          /kaniko/executor --context=\$(pwd) \
-                            --dockerfile=Dockerfile \
+                          /kaniko/executor --context=\$(pwd) \\
+                            --dockerfile=Dockerfile \\
                             --destination=${env.IMAGE_TAG}
                         """
                     }
@@ -135,6 +135,8 @@ spec:
         stage('Deploy to K8s') {
             steps {
                 // Use the Service Account token inherited by the agent for kubectl access
+                // Note: This step assumes the Jenkins agent Pod has the necessary Kubernetes permissions (Role/ClusterRole)
+                // bound to its ServiceAccount in the ${K8S_NAMESPACE}.
                 sh "kubectl config use-service-account -n ${K8S_NAMESPACE}"
                 
                 // Set the new image tag on the deployment for rolling update
