@@ -2,26 +2,19 @@ import { useCallback } from 'react';
 import type { ChatSession, KubeProject } from '../types.ts';
 import { useAuth } from './useAuth.tsx';
 import supabase from '../supabaseClient';
+import { getUserStorage, setUserStorage, removeUserStorage } from '../utils/sessionManager';
 
 export const useChatHistory = () => {
   const { user } = useAuth();
 
-  // Helper function to read chats from storage - not a hook
+  // Helper function to read chats from user-scoped storage
   const readChatsFromStorage = (userId: string): ChatSession[] => {
-    const storedChats = localStorage.getItem(`kube_ai_chats_${userId}`);
+    const storedChats = getUserStorage(userId, 'chats');
     return storedChats ? JSON.parse(storedChats) : [];
   };
 
   const getChatHistory = useCallback((): ChatSession[] => {
     if (!user) return [];
-    // If Supabase is configured, load from DB
-    if (supabase) {
-      // Note: this is synchronous hook API; return empty and let callers call separately if they want async behavior.
-      // For now, read from localStorage sync cache if available.
-      const stored = readChatsFromStorage(user.id);
-      return stored;
-    }
-
     return readChatsFromStorage(user.id);
   }, [user]);
 
@@ -40,18 +33,30 @@ export const useChatHistory = () => {
       tags: [],
     };
 
-    // Save to localStorage cache
+    // Save to user-scoped localStorage cache
     try {
       const chatHistory = readChatsFromStorage(user.id);
       chatHistory.unshift(newChat);
-      localStorage.setItem(`kube_ai_chats_${user.id}`, JSON.stringify(chatHistory));
+      setUserStorage(user.id, 'chats', JSON.stringify(chatHistory));
     } catch (e) {
       console.error('Failed to update local chat cache:', e);
     }
 
     // Also push to Supabase if available
     if (supabase) {
-      supabase.from('chats').insert([{ id: newChat.id, user_id: newChat.userId, prompt: newChat.prompt, generated_data: newChat.generatedData, created_at: newChat.createdAt, title: newChat.title, last_accessed_at: newChat.lastAccessedAt, starred: newChat.starred, tags: newChat.tags }])
+      supabase
+        .from('chats')
+        .insert([{
+          id: newChat.id,
+          user_id: newChat.userId,
+          prompt: newChat.prompt,
+          generated_data: newChat.generatedData,
+          created_at: newChat.createdAt,
+          title: newChat.title,
+          last_accessed_at: newChat.lastAccessedAt,
+          starred: newChat.starred,
+          tags: newChat.tags,
+        }])
         .catch((e) => console.error('Failed to save chat to Supabase:', e));
     }
 
@@ -64,13 +69,18 @@ export const useChatHistory = () => {
     try {
       const chatHistory = readChatsFromStorage(user.id);
       const filtered = chatHistory.filter((chat) => chat.id !== chatId);
-      localStorage.setItem(`kube_ai_chats_${user.id}`, JSON.stringify(filtered));
+      setUserStorage(user.id, 'chats', JSON.stringify(filtered));
     } catch (e) {
       console.error('Failed to update local chat cache:', e);
     }
 
     if (supabase) {
-      supabase.from('chats').delete().eq('id', chatId).eq('user_id', user.id).catch((e) => console.error('Failed to delete chat in Supabase:', e));
+      supabase
+        .from('chats')
+        .delete()
+        .eq('id', chatId)
+        .eq('user_id', user.id)
+        .catch((e) => console.error('Failed to delete chat in Supabase:', e));
     }
   }, [user]);
 
@@ -82,52 +92,61 @@ export const useChatHistory = () => {
 
   const clearAllChats = useCallback(() => {
     if (!user) return;
-    localStorage.removeItem(`kube_ai_chats_${user.id}`);
+    removeUserStorage(user.id, 'chats');
     if (supabase) {
-      supabase.from('chats').delete().eq('user_id', user.id).catch((e) => console.error('Failed to clear chats in Supabase:', e));
-    }
-  }, [user]);
-
-  const updateChatMetadata = useCallback((chatId: string, updates: Partial<ChatSession>) => {
-    if (!user) return;
-
-    try {
-      const chatHistory = readChatsFromStorage(user.id);
-      const chatIndex = chatHistory.findIndex((chat) => chat.id === chatId);
-      if (chatIndex !== -1) {
-        chatHistory[chatIndex] = { ...chatHistory[chatIndex], ...updates, lastAccessedAt: new Date().toISOString() };
-        localStorage.setItem(`kube_ai_chats_${user.id}`, JSON.stringify(chatHistory));
-      }
-    } catch (e) {
-      console.error('Failed to update chat metadata:', e);
-    }
-
-    if (supabase) {
-      supabase.from('chats').update({ ...updates, last_accessed_at: new Date().toISOString() }).eq('id', chatId).eq('user_id', user.id).catch((e) => console.error('Failed to update chat in Supabase:', e));
+      supabase
+        .from('chats')
+        .delete()
+        .eq('user_id', user.id)
+        .catch((e) => console.error('Failed to clear chats in Supabase:', e));
     }
   }, [user]);
 
   const starChat = useCallback((chatId: string, starred: boolean) => {
-    updateChatMetadata(chatId, { starred });
-  }, [updateChatMetadata]);
+    if (!user) return;
 
-  const addTagToChat = useCallback((chatId: string, tag: string) => {
-    const chat = getChatById(chatId);
-    if (chat) {
-      const tags = chat.tags || [];
-      if (!tags.includes(tag)) {
-        updateChatMetadata(chatId, { tags: [...tags, tag] });
+    try {
+      const chatHistory = readChatsFromStorage(user.id);
+      const chat = chatHistory.find((c) => c.id === chatId);
+      if (chat) {
+        chat.starred = starred;
+        setUserStorage(user.id, 'chats', JSON.stringify(chatHistory));
       }
+    } catch (e) {
+      console.error('Failed to star chat:', e);
     }
-  }, [getChatById, updateChatMetadata]);
 
-  const removeTagFromChat = useCallback((chatId: string, tag: string) => {
-    const chat = getChatById(chatId);
-    if (chat) {
-      const tags = (chat.tags || []).filter((t) => t !== tag);
-      updateChatMetadata(chatId, { tags });
+    if (supabase) {
+      supabase
+        .from('chats')
+        .update({ starred })
+        .eq('id', chatId)
+        .catch((e) => console.error('Failed to star chat in Supabase:', e));
     }
-  }, [getChatById, updateChatMetadata]);
+  }, [user]);
+
+  const tagChat = useCallback((chatId: string, tags: string[]) => {
+    if (!user) return;
+
+    try {
+      const chatHistory = readChatsFromStorage(user.id);
+      const chat = chatHistory.find((c) => c.id === chatId);
+      if (chat) {
+        chat.tags = tags;
+        setUserStorage(user.id, 'chats', JSON.stringify(chatHistory));
+      }
+    } catch (e) {
+      console.error('Failed to tag chat:', e);
+    }
+
+    if (supabase) {
+      supabase
+        .from('chats')
+        .update({ tags })
+        .eq('id', chatId)
+        .catch((e) => console.error('Failed to tag chat in Supabase:', e));
+    }
+  }, [user]);
 
   return {
     getChatHistory,
@@ -135,9 +154,7 @@ export const useChatHistory = () => {
     deleteChat,
     getChatById,
     clearAllChats,
-    updateChatMetadata,
     starChat,
-    addTagToChat,
-    removeTagFromChat,
+    tagChat,
   };
 };

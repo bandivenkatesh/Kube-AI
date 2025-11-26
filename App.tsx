@@ -8,7 +8,7 @@ import { ChatHistorySidebar } from './components/ChatHistorySidebar.tsx';
 import { useKubeGenerator } from './hooks/useKubeGenerator.ts';
 import { useAuth } from './hooks/useAuth.tsx';
 import { useChatHistory } from './hooks/useChatHistory.ts';
-import { useActivityLogger } from './hooks/useActivityLogger.ts';
+import { useSessionTracker } from './hooks/useSessionTracker.ts';
 import type { KubeProject, ChatSession } from './types.ts';
 import { Header } from './components/Header.tsx';
 import { WelcomeScreen } from './components/WelcomeScreen.tsx';
@@ -24,7 +24,20 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { generateKubeProject, isLoading, error } = useKubeGenerator();
   const { saveChat, getChatById } = useChatHistory();
-  const { logActivity } = useActivityLogger();
+  const { deactivateSession } = useSessionTracker();
+
+  // Reset state when user changes (logout -> login new user)
+  useEffect(() => {
+    if (user) {
+      // Clear current session state to prevent data leakage
+      setPrompt('');
+      setGeneratedData(null);
+      setCurrentChatId(undefined);
+    } else {
+      // User logged out - deactivate session
+      deactivateSession();
+    }
+  }, [user?.id, deactivateSession]); // Only re-run if user ID changes
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim()) return;
@@ -33,36 +46,20 @@ export default function App() {
     const data = await generateKubeProject(prompt);
     if (data) {
       setGeneratedData(data);
-      // Save to chat history
+      // Save to chat history (user-scoped automatically)
       const chat = saveChat(prompt, data);
       if (chat) {
         setCurrentChatId(chat.id);
-        // Log activity
-        logActivity(
-          'Generated Kubernetes Project',
-          `Created deployment for: ${prompt.substring(0, 50)}...`,
-          'generation',
-          '🚀',
-          { chatId: chat.id, promptLength: prompt.length }
-        );
       }
     }
-  }, [prompt, generateKubeProject, saveChat, logActivity]);
+  }, [prompt, generateKubeProject, saveChat]);
 
   const handleSelectChat = useCallback((chat: ChatSession) => {
     setCurrentChatId(chat.id);
     setPrompt(chat.prompt);
     setGeneratedData(chat.generatedData);
     setSidebarOpen(false);
-    // Log activity
-    logActivity(
-      'Loaded Chat History',
-      `Opened: ${chat.title}`,
-      'chat_load',
-      '📂',
-      { chatId: chat.id }
-    );
-  }, [logActivity]);
+  }, []);
 
   const handleGoHome = useCallback(() => {
     setPrompt('');

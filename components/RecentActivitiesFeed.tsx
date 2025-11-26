@@ -88,28 +88,3 @@ function formatTimeAgo(isoString: string): string {
   if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
   return date.toLocaleDateString();
 }
-
-
-  return (
-    <div className="w-full">
-      <h2 className="text-2xl font-bold text-slate-100 mb-6">Recent Activities</h2>
-      <div className="space-y-3">
-        {MOCK_ACTIVITIES.map((activity) => (
-          <div
-            key={activity.id}
-            className={`bg-gradient-to-r from-slate-700/30 to-slate-800/20 backdrop-blur-sm border border-slate-600/30 hover:border-slate-500/50 rounded-lg p-4 transition-all duration-300 ${getTypeColor(activity.type)} cursor-pointer hover:shadow-lg`}
-          >
-            <div className="flex items-start gap-4">
-              <span className="text-2xl flex-shrink-0">{activity.icon}</span>
-              <div className="flex-grow">
-                <p className="font-semibold text-slate-100">{activity.title}</p>
-                <p className="text-sm text-slate-400 mt-1">{activity.description}</p>
-                <p className="text-xs text-slate-500 mt-2">{activity.timestamp}</p>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};

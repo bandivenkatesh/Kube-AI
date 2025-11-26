@@ -1,6 +1,7 @@
 import React, { createContext, useState, useCallback, useEffect } from 'react';
 import type { User, AuthContextType } from '../types.ts';
 import supabase from '../supabaseClient';
+import { setUserStorage, getUserStorage, clearUserData, clearSessionId, getSessionId } from '../utils/sessionManager';
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -12,58 +13,45 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Initialize user from localStorage on mount
+  // Initialize user from Supabase or localStorage on mount
   useEffect(() => {
     const init = async () => {
       if (supabase) {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) {
-          console.error('Supabase session error:', error);
-        }
-        const session = data?.session;
-        if (session && session.user) {
-          // Try to fetch profile from 'profiles' table
-          try {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('id, username, email, created_at')
-              .eq('id', session.user.id)
-              .single();
-
-            if (profile) {
-              const userData: User = {
-                id: profile.id,
-                username: profile.username || profile.email,
-                email: profile.email,
-                createdAt: profile.created_at || new Date().toISOString(),
-              };
-              setUser(userData);
-              localStorage.setItem('kube_ai_user', JSON.stringify(userData));
-            }
-          } catch (e) {
-            console.error('Failed to fetch profile:', e);
+        try {
+          const { data, error } = await supabase.auth.getSession();
+          if (error) {
+            console.error('Supabase session error:', error);
           }
-        } else {
-          // Fallback to localStorage
-          const storedUser = localStorage.getItem('kube_ai_user');
-          if (storedUser) {
+          const session = data?.session;
+          if (session && session.user) {
+            // Fetch profile from 'profiles' table
             try {
-              setUser(JSON.parse(storedUser));
+              const { data: profile } = await supabase
+                .from('profiles')
+                .select('id, username, email, created_at')
+                .eq('id', session.user.id)
+                .single();
+
+              if (profile) {
+                const userData: User = {
+                  id: profile.id,
+                  username: profile.username || profile.email,
+                  email: profile.email,
+                  createdAt: profile.created_at || new Date().toISOString(),
+                };
+                setUser(userData);
+                // Store in user-namespaced storage
+                setUserStorage(userData.id, 'user_data', JSON.stringify(userData));
+                getSessionId(); // Generate session ID for this user
+              }
             } catch (e) {
-              console.error('Failed to parse stored user:', e);
-              localStorage.removeItem('kube_ai_user');
+              console.error('Failed to fetch profile:', e);
             }
+          } else {
+            setIsLoading(false);
           }
-        }
-      } else {
-        const storedUser = localStorage.getItem('kube_ai_user');
-        if (storedUser) {
-          try {
-            setUser(JSON.parse(storedUser));
-          } catch (e) {
-            console.error('Failed to parse stored user:', e);
-            localStorage.removeItem('kube_ai_user');
-          }
+        } catch (e) {
+          console.error('Auth init error:', e);
         }
       }
       setIsLoading(false);
@@ -80,11 +68,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       if (supabase) {
-        // Supabase expects an email; allow passing email or username (if username, try to lookup email)
+        // Supabase expects an email
         let emailToUse = username;
         if (!username.includes('@')) {
-          // lookup profile by username
-          const { data: profile } = await supabase.from('profiles').select('email').eq('username', username).single();
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('email')
+            .eq('username', username)
+            .single();
           if (profile && (profile as any).email) {
             emailToUse = (profile as any).email;
           }
@@ -95,38 +86,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
         const sessionUser = data?.user;
         if (sessionUser) {
-          const { data: profile } = await supabase.from('profiles').select('id, username, email, created_at').eq('id', sessionUser.id).single();
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('id, username, email, created_at')
+            .eq('id', sessionUser.id)
+            .single();
+
           const userData: User = {
             id: sessionUser.id,
             username: profile?.username || sessionUser.email || username,
             email: sessionUser.email || profile?.email || '',
             createdAt: profile?.created_at || new Date().toISOString(),
           };
+
           setUser(userData);
-          localStorage.setItem('kube_ai_user', JSON.stringify(userData));
+          // Store in user-namespaced storage
+          setUserStorage(userData.id, 'user_data', JSON.stringify(userData));
+          getSessionId(); // Generate new session ID
         }
       } else {
-        // Fallback to localStorage (legacy)
-        if (!username || !password) {
-          throw new Error('Username and password are required');
-        }
-
-        const storedUsers = localStorage.getItem('kube_ai_users');
-        const users: any[] = storedUsers ? JSON.parse(storedUsers) : [];
-
-        const foundUser = users.find((u) => u.username === username || u.email === username);
-        if (!foundUser) throw new Error('Invalid username or password');
-        if (foundUser.password !== password) throw new Error('Invalid username or password');
-
-        const userData: User = {
-          id: foundUser.id,
-          username: foundUser.username,
-          email: foundUser.email,
-          createdAt: foundUser.createdAt,
-        };
-
-        setUser(userData);
-        localStorage.setItem('kube_ai_user', JSON.stringify(userData));
+        throw new Error('Supabase not configured');
       }
     } finally {
       setIsLoading(false);
@@ -136,7 +115,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const register = useCallback(async (username: string, email: string, password: string) => {
     setIsLoading(true);
     try {
-      // Validation
       if (!username || !email || !password) {
         throw new Error('All fields are required');
       }
@@ -151,16 +129,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       if (supabase) {
-        // Use Supabase Auth to create user
         const { data, error } = await supabase.auth.signUp({ email, password });
         if (error && (error as any).status !== 400) {
-          // status 400 may indicate user already exists depending on Supabase settings
           throw error;
         }
 
-        // Insert profile record (if not exists)
         const userId = (data as any)?.user?.id || Date.now().toString();
-        const { error: profileErr } = await supabase.from('profiles').upsert({ id: userId, username, email, created_at: new Date().toISOString() });
+        const { error: profileErr } = await supabase.from('profiles').upsert({
+          id: userId,
+          username,
+          email,
+          created_at: new Date().toISOString(),
+        });
+
         if (profileErr) console.error('Failed to upsert profile:', profileErr);
 
         const userData: User = {
@@ -171,49 +152,33 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         };
 
         setUser(userData);
-        localStorage.setItem('kube_ai_user', JSON.stringify(userData));
+        setUserStorage(userData.id, 'user_data', JSON.stringify(userData));
+        getSessionId();
       } else {
-        // Fallback legacy localStorage registration
-        const storedUsers = localStorage.getItem('kube_ai_users');
-        const users: any[] = storedUsers ? JSON.parse(storedUsers) : [];
-
-        if (users.some((u) => u.username === username || u.email === email)) {
-          throw new Error('Username or email already exists');
-        }
-
-        const newUser = {
-          id: Date.now().toString(),
-          username,
-          email,
-          password,
-          createdAt: new Date().toISOString(),
-        };
-
-        users.push(newUser);
-        localStorage.setItem('kube_ai_users', JSON.stringify(users));
-
-        const userData: User = {
-          id: newUser.id,
-          username: newUser.username,
-          email: newUser.email,
-          createdAt: newUser.createdAt,
-        };
-
-        setUser(userData);
-        localStorage.setItem('kube_ai_user', JSON.stringify(userData));
+        throw new Error('Supabase not configured');
       }
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  const logout = useCallback(() => {
-    setUser(null);
-    localStorage.removeItem('kube_ai_user');
-    if (supabase) {
-      supabase.auth.signOut().catch((e) => console.error('Supabase signOut error:', e));
+  const logout = useCallback(async () => {
+    // Clear user-specific data
+    if (user) {
+      clearUserData(user.id);
     }
-  }, []);
+    clearSessionId();
+    
+    setUser(null);
+
+    if (supabase) {
+      try {
+        await supabase.auth.signOut();
+      } catch (e) {
+        console.error('Supabase signOut error:', e);
+      }
+    }
+  }, [user]);
 
   return (
     <AuthContext.Provider value={{ user, isLoading, login, register, logout }}>
