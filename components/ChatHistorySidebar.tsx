@@ -16,8 +16,9 @@ export const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({
   isOpen,
   onClose,
 }) => {
-  const { getChatHistory, deleteChat } = useChatHistory();
+  const { getChatHistory, deleteChat, starChat } = useChatHistory();
   const [chats, setChats] = useState<ChatSession[]>([]);
+  const [filterStarred, setFilterStarred] = useState(false);
 
   useEffect(() => {
     const history = getChatHistory();
@@ -29,6 +30,19 @@ export const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({
     if (confirm('Are you sure you want to delete this chat?')) {
       deleteChat(chatId);
       setChats(chats.filter((c) => c.id !== chatId));
+    }
+  };
+
+  const handleStarChat = (e: React.MouseEvent, chatId: string) => {
+    e.stopPropagation();
+    const chat = chats.find((c) => c.id === chatId);
+    if (chat) {
+      starChat(chatId, !chat.starred);
+      setChats(
+        chats.map((c) =>
+          c.id === chatId ? { ...c, starred: !c.starred } : c
+        )
+      );
     }
   };
 
@@ -47,6 +61,8 @@ export const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({
 
     return date.toLocaleDateString();
   };
+
+  const filteredChats = filterStarred ? chats.filter((c) => c.starred) : chats;
 
   return (
     <>
@@ -79,11 +95,25 @@ export const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({
             Chat History
           </h2>
 
-          {chats.length === 0 ? (
-            <p className="text-slate-400 text-sm">No chats yet. Start by generating a new project!</p>
+          {/* Filter Toggle */}
+          <button
+            onClick={() => setFilterStarred(!filterStarred)}
+            className={`w-full mb-4 px-3 py-2 text-sm rounded-lg transition-colors ${
+              filterStarred
+                ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30'
+                : 'bg-slate-700/50 text-slate-300 hover:bg-slate-700 border border-slate-600'
+            }`}
+          >
+            {filterStarred ? '⭐ Show All' : '☆ Starred Only'}
+          </button>
+
+          {filteredChats.length === 0 ? (
+            <p className="text-slate-400 text-sm">
+              {filterStarred ? 'No starred chats yet!' : 'No chats yet. Start by generating a new project!'}
+            </p>
           ) : (
             <div className="space-y-2">
-              {chats.map((chat) => (
+              {filteredChats.map((chat) => (
                 <div
                   key={chat.id}
                   onClick={() => {
@@ -98,20 +128,42 @@ export const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-200 truncate">
-                        {chat.title}
-                      </p>
-                      <p className="text-xs text-slate-400 mt-1">
-                        {formatDate(chat.createdAt)}
-                      </p>
+                      <p className="text-sm font-medium text-slate-100 truncate">{chat.title}</p>
+                      <p className="text-xs text-slate-400 mt-1">{formatDate(chat.createdAt)}</p>
+                      {chat.tags && chat.tags.length > 0 && (
+                        <div className="flex gap-1 mt-2 flex-wrap">
+                          {chat.tags.slice(0, 2).map((tag) => (
+                            <span key={tag} className="text-xs px-2 py-0.5 bg-slate-600/50 text-slate-300 rounded">
+                              #{tag}
+                            </span>
+                          ))}
+                          {chat.tags.length > 2 && (
+                            <span className="text-xs text-slate-400">+{chat.tags.length - 2}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <button
-                      onClick={(e) => handleDeleteChat(e, chat.id)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-red-400 flex-shrink-0"
-                      title="Delete chat"
-                    >
-                      <TrashIcon className="w-4 h-4" />
-                    </button>
+
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                      <button
+                        onClick={(e) => handleStarChat(e, chat.id)}
+                        className={`p-1.5 rounded text-lg transition-colors ${
+                          chat.starred
+                            ? 'text-yellow-400'
+                            : 'text-slate-400 hover:text-yellow-400'
+                        }`}
+                        title={chat.starred ? 'Unstar' : 'Star'}
+                      >
+                        {chat.starred ? '⭐' : '☆'}
+                      </button>
+                      <button
+                        onClick={(e) => handleDeleteChat(e, chat.id)}
+                        className="p-1.5 text-slate-400 hover:text-red-400 transition-colors"
+                        title="Delete"
+                      >
+                        <TrashIcon className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}

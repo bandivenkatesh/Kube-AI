@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { InputPanel } from './components/InputPanel.tsx';
 import { OutputDisplay } from './components/OutputDisplay.tsx';
@@ -7,9 +8,12 @@ import { ChatHistorySidebar } from './components/ChatHistorySidebar.tsx';
 import { useKubeGenerator } from './hooks/useKubeGenerator.ts';
 import { useAuth } from './hooks/useAuth.tsx';
 import { useChatHistory } from './hooks/useChatHistory.ts';
+import { useActivityLogger } from './hooks/useActivityLogger.ts';
 import type { KubeProject, ChatSession } from './types.ts';
 import { Header } from './components/Header.tsx';
 import { WelcomeScreen } from './components/WelcomeScreen.tsx';
+import { StickyActionBar } from './components/StickyActionBar.tsx';
+import { Footer } from './components/Footer.tsx';
 
 export default function App() {
   // Call all hooks at the top level - BEFORE any conditional returns
@@ -20,6 +24,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { generateKubeProject, isLoading, error } = useKubeGenerator();
   const { saveChat, getChatById } = useChatHistory();
+  const { logActivity } = useActivityLogger();
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim()) return;
@@ -32,15 +37,37 @@ export default function App() {
       const chat = saveChat(prompt, data);
       if (chat) {
         setCurrentChatId(chat.id);
+        // Log activity
+        logActivity(
+          'Generated Kubernetes Project',
+          `Created deployment for: ${prompt.substring(0, 50)}...`,
+          'generation',
+          '🚀',
+          { chatId: chat.id, promptLength: prompt.length }
+        );
       }
     }
-  }, [prompt, generateKubeProject, saveChat]);
+  }, [prompt, generateKubeProject, saveChat, logActivity]);
 
   const handleSelectChat = useCallback((chat: ChatSession) => {
     setCurrentChatId(chat.id);
     setPrompt(chat.prompt);
     setGeneratedData(chat.generatedData);
     setSidebarOpen(false);
+    // Log activity
+    logActivity(
+      'Loaded Chat History',
+      `Opened: ${chat.title}`,
+      'chat_load',
+      '📂',
+      { chatId: chat.id }
+    );
+  }, [logActivity]);
+
+  const handleGoHome = useCallback(() => {
+    setPrompt('');
+    setGeneratedData(null);
+    setCurrentChatId(undefined);
   }, []);
 
   // Show loading while auth is initializing
@@ -61,8 +88,13 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} isSidebarOpen={sidebarOpen} />
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <Header 
+        onMenuClick={() => setSidebarOpen(!sidebarOpen)} 
+        isSidebarOpen={sidebarOpen}
+        onHomeClick={handleGoHome}
+        showHomeButton={!!generatedData}
+      />
       
       <div className="flex-grow flex">
         {/* Chat History Sidebar */}
@@ -111,6 +143,15 @@ export default function App() {
           </div>
         </main>
       </div>
+
+      {/* Sticky Action Bar */}
+      <StickyActionBar
+        onAskAI={() => console.log('Ask AI clicked')}
+        onSettings={() => console.log('Settings clicked')}
+      />
+
+      {/* Footer */}
+      <Footer />
     </div>
   );
 }

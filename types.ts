@@ -25,6 +25,9 @@ export interface ChatSession {
   generatedData: KubeProject;
   createdAt: string;
   title: string;
+  lastAccessedAt?: string;
+  starred?: boolean;
+  tags?: string[];
 }
 
 export interface User {

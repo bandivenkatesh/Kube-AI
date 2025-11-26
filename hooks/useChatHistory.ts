@@ -35,6 +35,9 @@ export const useChatHistory = () => {
       generatedData,
       createdAt: new Date().toISOString(),
       title: prompt.substring(0, 50) + (prompt.length > 50 ? '...' : ''),
+      lastAccessedAt: new Date().toISOString(),
+      starred: false,
+      tags: [],
     };
 
     // Save to localStorage cache
@@ -48,7 +51,7 @@ export const useChatHistory = () => {
 
     // Also push to Supabase if available
     if (supabase) {
-      supabase.from('chats').insert([{ id: newChat.id, user_id: newChat.userId, prompt: newChat.prompt, generated_data: newChat.generatedData, created_at: newChat.createdAt, title: newChat.title }])
+      supabase.from('chats').insert([{ id: newChat.id, user_id: newChat.userId, prompt: newChat.prompt, generated_data: newChat.generatedData, created_at: newChat.createdAt, title: newChat.title, last_accessed_at: newChat.lastAccessedAt, starred: newChat.starred, tags: newChat.tags }])
         .catch((e) => console.error('Failed to save chat to Supabase:', e));
     }
 
@@ -85,11 +88,56 @@ export const useChatHistory = () => {
     }
   }, [user]);
 
+  const updateChatMetadata = useCallback((chatId: string, updates: Partial<ChatSession>) => {
+    if (!user) return;
+
+    try {
+      const chatHistory = readChatsFromStorage(user.id);
+      const chatIndex = chatHistory.findIndex((chat) => chat.id === chatId);
+      if (chatIndex !== -1) {
+        chatHistory[chatIndex] = { ...chatHistory[chatIndex], ...updates, lastAccessedAt: new Date().toISOString() };
+        localStorage.setItem(`kube_ai_chats_${user.id}`, JSON.stringify(chatHistory));
+      }
+    } catch (e) {
+      console.error('Failed to update chat metadata:', e);
+    }
+
+    if (supabase) {
+      supabase.from('chats').update({ ...updates, last_accessed_at: new Date().toISOString() }).eq('id', chatId).eq('user_id', user.id).catch((e) => console.error('Failed to update chat in Supabase:', e));
+    }
+  }, [user]);
+
+  const starChat = useCallback((chatId: string, starred: boolean) => {
+    updateChatMetadata(chatId, { starred });
+  }, [updateChatMetadata]);
+
+  const addTagToChat = useCallback((chatId: string, tag: string) => {
+    const chat = getChatById(chatId);
+    if (chat) {
+      const tags = chat.tags || [];
+      if (!tags.includes(tag)) {
+        updateChatMetadata(chatId, { tags: [...tags, tag] });
+      }
+    }
+  }, [getChatById, updateChatMetadata]);
+
+  const removeTagFromChat = useCallback((chatId: string, tag: string) => {
+    const chat = getChatById(chatId);
+    if (chat) {
+      const tags = (chat.tags || []).filter((t) => t !== tag);
+      updateChatMetadata(chatId, { tags });
+    }
+  }, [getChatById, updateChatMetadata]);
+
   return {
     getChatHistory,
     saveChat,
     deleteChat,
     getChatById,
     clearAllChats,
+    updateChatMetadata,
+    starChat,
+    addTagToChat,
+    removeTagFromChat,
   };
 };

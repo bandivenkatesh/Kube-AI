@@ -42,10 +42,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           <div className="flex items-center justify-center mb-4">
             <SparklesIcon className="w-12 h-12 text-sky-400" />
           </div>
-          <h1 className="text-4xl font-bold text-slate-100">
-            KubeArchitect <span className="text-sky-400">AI</span>
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-sky-400 to-purple-400 bg-clip-text text-transparent">
+            QuantamKube.ai
           </h1>
-          <p className="text-slate-400 mt-2">Your AI-Powered Kubernetes Co-Pilot</p>
+          <p className="text-slate-400 mt-2">Kubernetes Supercharged with AI</p>
         </div>
 
         {/* Form Card */}
