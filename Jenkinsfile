@@ -1,23 +1,24 @@
 // == USER DEFINED VARIABLES ==
-def K8S_DEPLOYMENT_NAME = "your-app-deployment-name" // The name of your K8s Deployment resource
-def K8S_NAMESPACE = "app-namespace"                 // The target namespace for deployment
-def REGISTRY_IMAGE = "your-registry/your-node-app"   // e.g., docker.io/myuser/node-app
-def SONAR_PROJECT_KEY = "node-app-project-key"      // Key defined in SonarQube
-def SONAR_SERVER_NAME = "SonarQube-Server"          // Name used in Jenkins > Configure System
-def DOCKER_AUTH_SECRET = "docker-auth-secret"       // K8s Secret name for Kaniko credentials
+// IMPORTANT: Update these values to match your specific environment
+def K8S_DEPLOYMENT_NAME = "kube-ai"                  // The name of your K8s Deployment resource
+def K8S_NAMESPACE = "app-namespace"                  // The target namespace for deployment
+def REGISTRY_IMAGE = "venky2222/your-node-app"       // Docker Registry path (e.g., docker.io/username/repo)
+def SONAR_PROJECT_KEY = "node-app-project-key"       // Key defined in SonarQube for this project
+def SONAR_SERVER_NAME = "SonarQube-Server"           // Name used in Jenkins > Configure System
+def DOCKER_AUTH_SECRET = "docker-auth-secret"        // K8s Secret name containing Docker credentials for Kaniko mount
 
 // == PIPELINE DEFINITION ==
 pipeline {
-    // 1. Dynamic Agent Configuration (Runs on Kubernetes)
+    // 1. Dynamic Agent Configuration (Launches a dedicated Pod on Kubernetes)
     agent {
         kubernetes {
-            // No 'label' is used here; the entire Pod is defined below.
+            // Define the complete Pod spec with all required containers.
             yaml """
 apiVersion: v1
 kind: Pod
 spec:
   containers:
-  # 1. JNLP Container (REQUIRED for agent-master handshake)
+  # 1. JNLP Container (REQUIRED: Handles communication back to the Jenkins Master)
   - name: jnlp
     image: jenkins/jnlp-agent:latest-jdk17 
     args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)', '\$(JENKINS_WEB_SOCKET)']
@@ -26,7 +27,7 @@ spec:
         memory: 256Mi
         cpu: 100m
 
-  # 2. NODE Container (The primary build environment)
+  # 2. NODE Container (The primary container for running npm, tests, and Sonar Scanner)
   - name: node
     image: node:20-slim 
     command:
@@ -37,7 +38,7 @@ spec:
         memory: 512Mi
         cpu: 500m
         
-  # 3. KANIKO Container (For building the Docker image securely)
+  # 3. KANIKO Container (For building and pushing the Docker image)
   - name: kaniko
     image: gcr.io/kaniko-project/executor:v1.9.0-debug
     command:
@@ -50,28 +51,30 @@ spec:
   volumes:
   - name: docker-config
     secret:
+      # Mounts the K8s Secret containing Docker config.json for Kaniko auth
       secretName: ${DOCKER_AUTH_SECRET}
 """
         }
     }
     
-    // Environment variables for use throughout the pipeline
+    // Global environment variables
     environment {
         SONAR_PROJECT_KEY_ENV = "${SONAR_PROJECT_KEY}" 
         SONAR_SERVER_ENV = "${SONAR_SERVER_NAME}" 
         IMAGE_TAG = "${REGISTRY_IMAGE}:${BUILD_NUMBER}"
     }
 
-    // Options to skip default checkout and set a timeout
     options {
+        // Skip the default checkout to manage it explicitly in the first stage
         skipDefaultCheckout()
+        // Set an overall timeout for the entire build
         timeout(time: 30, unit: 'MINUTES')
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                // Assuming 'github-credentials' is your Jenkins ID for GitHub PAT
+                // Assuming 'github-credentials' is your Jenkins credential ID for GitHub PAT
                 checkout scm: [$class: 'GitSCM', branches: [[name: '*/main']], 
                                extensions: [], 
                                userRemoteConfigs: [[credentialsId: 'github-credentials', 
@@ -81,7 +84,7 @@ spec:
         
         stage('Install Dependencies') {
             steps {
-                container('node') { // Runs inside the Node container
+                container('node') {
                     sh 'npm install'
                 }
             }
@@ -92,9 +95,11 @@ spec:
                 container('node') {
                     sh 'npm test' 
                 }
+                // Use the server name configured in Manage Jenkins > Configure System
                 withSonarQubeEnv(env.SONAR_SERVER_ENV) {
                     container('node') {
-                        sh "npm install -g sonarqube-scanner" // Install scanner in the agent container
+                        // Install Sonar Scanner globally inside the agent container
+                        sh "npm install -g sonarqube-scanner" 
                         sh "sonar-scanner -Dsonar.projectKey=${env.SONAR_PROJECT_KEY_ENV} -Dsonar.sources=."
                     }
                 }
@@ -104,7 +109,7 @@ spec:
         stage('Quality Gate Check') {
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
-                    // Pipeline waits here. Fails build if Quality Gate fails.
+                    // Waits for SonarQube analysis result and fails the build if the Quality Gate fails
                     waitForQualityGate abortPipeline: true
                 }
             }
@@ -112,8 +117,8 @@ spec:
 
         stage('Build & Push Docker Image') {
             steps {
-                container('kaniko') { // Runs inside the Kaniko container
-                    // Assuming 'docker-registry-credentials' is your Jenkins ID for registry creds
+                container('kaniko') { 
+                    // Use a Jenkins credential ID to ensure environment variables are set (optional for Kaniko)
                     withCredentials([usernamePassword(credentialsId: 'docker-registry-credentials', 
                                                      passwordVariable: 'PASS', 
                                                      usernameVariable: 'USER')]) {
@@ -129,13 +134,13 @@ spec:
         
         stage('Deploy to K8s') {
             steps {
-                // The agent uses its Service Account token for kubectl authentication
+                // Use the Service Account token inherited by the agent for kubectl access
                 sh "kubectl config use-service-account -n ${K8S_NAMESPACE}"
                 
-                // Perform Rolling Update by setting the new image tag
+                // Set the new image tag on the deployment for rolling update
                 sh "kubectl set image deployment/${K8S_DEPLOYMENT_NAME} node-app-container=${env.IMAGE_TAG} -n ${K8S_NAMESPACE}"
                 
-                // Wait for the rollout to complete before marking the job successful
+                // Wait for the new Pod to become ready before completing the stage
                 sh "kubectl rollout status deployment/${K8S_DEPLOYMENT_NAME} -n ${K8S_NAMESPACE}"
             }
         }
